@@ -1,0 +1,63 @@
+ALVE Identification Pipeline
+
+Author:	Andrew Mason
+Email:	andrew.mason@roslin.ed.ac.uk
+Date:	27th June 2017
+
+This pipeline was constructed as part of Andrew's PhD thesis, submitted in July 2017. This pipeline enables the detection of novel endogenous retroviruses (ERVs) from whole genome resequencing data compared to a reference genome. 
+This pipeline will be described in an upcoming publication - Mason et al (manuscript in preparation)
+
+The standard usage for this pipeline is with paired end data, Illumina data, although other datasets can be used as long as FASTQ files are formatted in standard manner. 
+
+The user must provide a fasta file of reference retrovirus sequences which the user wishes to detect, such as a fasta file with ALVE sequences as was used in the design. The user also needs to provide a reference genome with BLAST database files available:
+
+$ makeblastdb -in genome.fa -type nucl
+
+The user may wish to make a second file with ERVs which share close homology as the ERV of interest, such as EAVs when studying ALVEs, so as to reduce incorrect mapping.
+
+## Standard protocol - Paired end Illumina
+
+./S1_run_blast_ref_seq.sh ref_seq.fa ref_genome.fa
+This script identifies sites with homology to your chosen ERVs already assembled in the reference genome and produces a reference list. The appended homology file is useful here. 
+
+python ./S2_make_pseudochromosome.py [--gap INT] [--ref_gen GENOME.FA] ref_seq.fa
+Use the focused ERV fasta file here to create a pseudochromosome of ERV sequences for initial mapping. By default sequences will be spaced 500bp apart so there is no need to set the gap parameter, but if you have very long reads (v. unlikely) you could set this longer. The ref_gen option enables you to append the pseudochromosome to your given reference genome in a new file, also unnecessary in the majority of cases.
+
+./S3_run_bwa_alignment.sh path/to/ROOT_NAME_ run lane pseudochromosome.fa
+Use this script to perform the alignment of reads to the pseudochromosome file generated about by S2. If the specific run and lane numbers are not known or unimportant, fill these with an integer. The script expects each fastq to be in the form ROOT_NAME_read1.fastq.gz or ROOT_NAME_read2.fastq.gz, so for the script to access both files only use ROOT_NAME_
+
+./S4_extract_ref_seq_mapped_reads.sh file.sorted.bam
+This script takes the sorted and indexed bam file from S3 and extracts new fastq files
+
+./S5_run_bwa_alignment.sh path/to/ROOT_NAME_ run lane ref_genome.fa
+As S3, but taking the 'viral mapped' FASTQ files and mapping to the reference genome.
+
+python S6_extract_putative_sites.py viral_mapped.sorted.bam ref_homology_pos.bed ref_genome.fa
+This script takes the viral_mapped BAM from S5, the homologous assembled sites from S1 and the reference genome, and produces putative novel insertion sites.
+
+./S7_merged_lists_and_reduce_ref_genome.sh prefix ref_genome.fa
+This script is not essential, but concatenates all identified sites within a given directory (if multiple individual sequencing datasets have been analysed, for example), creates an overall file, and also produces a reduced reference genome only including the sequences with matches (for easier IGV analysis)
+
+This protocol is summarised in 00_pipeline_schematics.pdf
+The user then transfers the putative site files and checks each site in a browser such as IGV. Sites can also be compared to known locations for non-visual annotation.
+
+## Additional protocols
+
+1) Single end data
+The protocol is as above, but:
+	S3 and S5 are replaced by se_S1_run_bwa_alignment.sh, using the full path to the one FASTQ file
+	S4 is replaced by se_S2_extract_ref_seq_mapped_reads.sh
+	S6 is replaced by se_S3_extract_putative_sites.py 
+
+	Both S4 and S6 are very similar to their paired end versions, but adapted for a single FASTQ file. The command to run is the same.
+	This is also summarised in the 00_pipeline_schematics.pdf file
+	
+2) SOLiD colorspace FASTQ files
+These are also single end (generally), but the FASTQ files are in colorspace rather than the standard basespace. If the quality scores have been converted in the FASTQ to Illumina quality scoring (as standard), the accessory script color-fastq2sanger-fastq.py can be used to generate Illumina style FASTQ files to be used with this pipeline.
+
+## NOTES
+1) This pipeine will not detect whether an assembled ERV is within your dataset, this will need to be checked manually - do reads span the gap between genome and insertion? If so, it is present.
+2) This pipeline will not detect sites which are in very poorly assembled regions
+3) This pipeline requires reads to bridge the gap between genome and ERV to create soft clipped reads. With single end datasets this requires reads at least 50bp in length AND for there to be good coverage (>10X). 
+4) This pipeline does not currently work with long read sequencing
+5) Users should take care to identify genes which have been co-opted by a particular virus from the host, such as chicken-SRC in Rous Sarcoma Virus. This will cause strange mapping to exonic regions in co-opted genes. 
